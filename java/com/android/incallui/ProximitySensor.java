@@ -50,6 +50,7 @@ public class ProximitySensor
   private final ProximityDisplayListener mDisplayListener;
   private int mOrientation = AccelerometerListener.ORIENTATION_UNKNOWN;
   private boolean mUiShowing = false;
+  private boolean mHasIncomingCall = false;
   private boolean mIsPhoneOffhook = false;
   private boolean mDialpadVisible;
   private boolean mIsAttemptingVideoCall;
@@ -103,6 +104,7 @@ public class ProximitySensor
     // can also put the in-call screen in the INCALL state.
     boolean hasOngoingCall = InCallState.INCALL == newState && callList.hasLiveCall();
     boolean isOffhook = (InCallState.OUTGOING == newState) || hasOngoingCall;
+    mHasIncomingCall = (InCallState.INCOMING == newState);
 
     DialerCall activeCall = callList.getActiveCall();
     boolean isVideoCall = activeCall != null && activeCall.isVideoCall();
@@ -115,6 +117,10 @@ public class ProximitySensor
       mAccelerometerListener.enable(mIsPhoneOffhook);
 
       updateProximitySensorMode();
+    }
+
+    if (mHasIncomingCall) {
+        updateProximitySensorMode();
     }
   }
 
@@ -235,15 +241,15 @@ public class ProximitySensor
         mUiShowing,
         CallAudioState.audioRouteToString(audioRoute));
 
-    if (mIsPhoneOffhook && !screenOnImmediately) {
+    if ((mIsPhoneOffhook || mHasIncomingCall) && !screenOnImmediately) {
       LogUtil.v("ProximitySensor.updateProximitySensorMode", "turning on proximity sensor");
       // Phone is in use!  Arrange for the screen to turn off
       // automatically when the sensor detects a close object.
       turnOnProximitySensor();
     } else {
       LogUtil.v("ProximitySensor.updateProximitySensorMode", "turning off proximity sensor");
-      // Phone is either idle, or ringing.  We don't want any special proximity sensor
-      // behavior in either case.
+      // Phone is idle.  We don't want any special proximity sensor
+      // behavior in this case.
       turnOffProximitySensor(screenOnImmediately);
     }
   }
