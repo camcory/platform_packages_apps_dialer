@@ -58,7 +58,6 @@
             android:layout_marginEnd="@dimen/call_log_icon_margin"
             android:src="@drawable/ic_close_dk"
             android:tint="@color/recent_call_log_item_phone_icon_tint"
-            android:alpha="0.3"
             android:background="?android:attr/selectableItemBackground"
             android:visibility="gone"
             android:contentDescription="@string/description_dismiss" />
