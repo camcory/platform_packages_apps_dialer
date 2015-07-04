@@ -19,16 +19,20 @@ package com.android.dialer.calllog;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.Loader;
 import android.content.res.Resources;
 import android.database.Cursor;
-import android.graphics.drawable.Drawable;
+import android.database.sqlite.SQLiteFullException;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Message;
 import android.provider.CallLog.Calls;
+import android.provider.ContactsContract;
 import android.provider.ContactsContract.PhoneLookup;
 import android.telecom.PhoneAccountHandle;
+import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.AccessibilityDelegate;
@@ -44,6 +48,9 @@ import com.android.common.widget.GroupingListAdapter;
 import com.android.contacts.common.CallUtil;
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
+import com.android.contacts.common.util.PhoneNumberHelper;
+import com.android.contacts.common.model.Contact;
+import com.android.contacts.common.model.ContactLoader;
 import com.android.contacts.common.util.UriUtils;
 import com.android.dialer.DialtactsActivity;
 import com.android.dialer.PhoneCallDetails;
@@ -55,6 +62,7 @@ import com.android.dialer.util.ExpirableCache;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 
@@ -63,6 +71,7 @@ import java.util.LinkedList;
  */
 public class CallLogAdapter extends GroupingListAdapter
         implements ViewTreeObserver.OnPreDrawListener, CallLogGroupBuilder.GroupCreator {
+    private static final String TAG = CallLogAdapter.class.getSimpleName();
 
     private static final int VOICEMAIL_TRANSCRIPTION_MAX_LINES = 10;
 
@@ -74,10 +83,10 @@ public class CallLogAdapter extends GroupingListAdapter
     /** Interface used to inform a parent UI element that a list item has been expanded. */
     public interface CallItemExpandedListener {
         /**
-         * @param view The {@link CallLogListItemView} that represents the item that was clicked
+         * @param view The {@link View} that represents the item that was clicked
          *         on.
          */
-        public void onItemExpanded(CallLogListItemView view);
+        public void onItemExpanded(View view);
 
         /**
          * Retrieves the call log view for the specified call Id.  If the view is not currently
@@ -86,7 +95,7 @@ public class CallLogAdapter extends GroupingListAdapter
          * @param callId The call Id.
          * @return The call log view.
          */
-        public CallLogListItemView getViewForCallId(long callId);
+        public View getViewForCallId(long callId);
     }
 
     /** Interface used to initiate a refresh of the content. */
@@ -267,6 +276,7 @@ public class CallLogAdapter extends GroupingListAdapter
     private int mCallLogBackgroundColor;
     private int mExpandedBackgroundColor;
     private float mExpandedTranslationZ;
+    private int mPhotoSize;
 
     /** Listener for the primary or secondary actions in the list.
      *  Primary opens the call details.
@@ -286,7 +296,7 @@ public class CallLogAdapter extends GroupingListAdapter
     private final View.OnClickListener mExpandCollapseListener = new View.OnClickListener() {
         @Override
         public void onClick(View v) {
-            final CallLogListItemView callLogItem = (CallLogListItemView) v.getParent().getParent();
+            final View callLogItem = (View) v.getParent().getParent();
             handleRowExpanded(callLogItem, true /* animate */, false /* forceExpand */);
         }
     };
@@ -296,7 +306,7 @@ public class CallLogAdapter extends GroupingListAdapter
         public boolean onRequestSendAccessibilityEvent(ViewGroup host, View child,
                 AccessibilityEvent event) {
             if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED) {
-                handleRowExpanded((CallLogListItemView) host, false /* animate */,
+                handleRowExpanded(host, false /* animate */,
                         true /* forceExpand */);
             }
             return super.onRequestSendAccessibilityEvent(host, child, event);
@@ -365,6 +375,7 @@ public class CallLogAdapter extends GroupingListAdapter
         mCallLogBackgroundColor = resources.getColor(R.color.background_dialer_list_items);
         mExpandedBackgroundColor = resources.getColor(R.color.call_log_expanded_background_color);
         mExpandedTranslationZ = resources.getDimension(R.dimen.call_log_expanded_translation_z);
+        mPhotoSize = resources.getDimensionPixelSize(R.dimen.contact_photo_size);
 
         mContactPhotoManager = ContactPhotoManager.getInstance(mContext);
         mPhoneNumberHelper = new PhoneNumberDisplayHelper(mContext, resources);
@@ -588,8 +599,7 @@ public class CallLogAdapter extends GroupingListAdapter
     @Override
     protected View newChildView(Context context, ViewGroup parent) {
         LayoutInflater inflater = LayoutInflater.from(context);
-        CallLogListItemView view =
-                (CallLogListItemView) inflater.inflate(R.layout.call_log_list_item, parent, false);
+        View view = inflater.inflate(R.layout.call_log_list_item, parent, false);
 
         // Get the views to bind to and cache them.
         CallLogListItemViews views = CallLogListItemViews.fromView(view);
@@ -624,14 +634,13 @@ public class CallLogAdapter extends GroupingListAdapter
     /**
      * Binds the views in the entry to the data in the call log.
      *
-     * @param view the view corresponding to this entry
+     * @param callLogItemView the view corresponding to this entry
      * @param c the cursor pointing to the entry in the call log
      * @param count the number of entries in the current item, greater than 1 if it is a group
      */
-    private void bindView(View view, Cursor c, int count) {
-        view.setAccessibilityDelegate(mAccessibilityDelegate);
-        final CallLogListItemView callLogItemView = (CallLogListItemView) view;
-        final CallLogListItemViews views = (CallLogListItemViews) view.getTag();
+    private void bindView(View callLogItemView, Cursor c, int count) {
+        callLogItemView.setAccessibilityDelegate(mAccessibilityDelegate);
+        final CallLogListItemViews views = (CallLogListItemViews) callLogItemView.getTag();
 
         // Default case: an item in the call log.
         views.primaryActionView.setVisibility(View.VISIBLE);
@@ -750,7 +759,8 @@ public class CallLogAdapter extends GroupingListAdapter
         final String label = info.label;
         final long photoId = info.photoId;
         final Uri photoUri = info.photoUri;
-        CharSequence formattedNumber = info.formattedNumber;
+        CharSequence formattedNumber = info.formattedNumber == null
+                ? null : PhoneNumberUtils.ttsSpanAsPhoneNumber(info.formattedNumber);
         final int[] callTypes = getCallTypes(c, count);
         final String geocode = c.getString(CallLogQuery.GEOCODED_LOCATION);
         final int sourceType = info.sourceType;
@@ -813,11 +823,11 @@ public class CallLogAdapter extends GroupingListAdapter
 
         // Listen for the first draw
         if (mViewTreeObserver == null) {
-            mViewTreeObserver = view.getViewTreeObserver();
+            mViewTreeObserver = callLogItemView.getViewTreeObserver();
             mViewTreeObserver.addOnPreDrawListener(this);
         }
 
-        bindBadge(view, info, details, callType);
+        bindBadge(callLogItemView, info, details, callType);
     }
 
     /**
@@ -886,12 +896,13 @@ public class CallLogAdapter extends GroupingListAdapter
     }
 
     /**
-     * Expands or collapses the view containing the CALLBACK, VOICEMAIL and DETAILS action buttons.
+     * Expands or collapses the view containing the CALLBACK/REDIAL, VOICEMAIL and DETAILS action
+     * buttons.
      *
      * @param callLogItem The call log entry parent view.
      * @param isExpanded The new expansion state of the view.
      */
-    private void expandOrCollapseActions(CallLogListItemView callLogItem, boolean isExpanded) {
+    private void expandOrCollapseActions(View callLogItem, boolean isExpanded) {
         final CallLogListItemViews views = (CallLogListItemViews)callLogItem.getTag();
 
         expandVoicemailTranscriptionView(views, isExpanded);
@@ -981,7 +992,8 @@ public class CallLogAdapter extends GroupingListAdapter
     }
 
     /***
-     * Binds click handlers and intents to the voicemail, details and callback action buttons.
+     * Binds text titles, click handlers and intents to the voicemail, details and callback action
+     * buttons.
      *
      * @param views  The call log item views.
      */
@@ -1004,6 +1016,14 @@ public class CallLogAdapter extends GroupingListAdapter
             }
             views.callBackButtonView.setVisibility(View.VISIBLE);
             views.callBackButtonView.setOnClickListener(mActionListener);
+
+            final int titleId;
+            if (views.callType == Calls.VOICEMAIL_TYPE || views.callType == Calls.OUTGOING_TYPE) {
+                titleId = R.string.call_log_action_redial;
+            } else {
+                titleId = R.string.call_log_action_call_back;
+            }
+            views.callBackButtonView.setText(mContext.getString(titleId));
         } else {
             // Number is not callable, so hide button.
             views.callBackButtonView.setTag(null);
@@ -1052,36 +1072,48 @@ public class CallLogAdapter extends GroupingListAdapter
     }
 
     protected void bindBadge(
-            View view, ContactInfo info, final PhoneCallDetails details, int callType) {
+            View view, final ContactInfo info, final PhoneCallDetails details, int callType) {
         // Do not show badge in call log.
         if (!mIsCallLog) {
             final ViewStub stub = (ViewStub) view.findViewById(R.id.link_stub);
             if (UriUtils.isEncodedContactUri(info.lookupUri)) {
                 if (stub != null) {
-                    final View inflated = stub.inflate();
-                    inflated.setVisibility(View.VISIBLE);
-                    mBadgeContainer = inflated.findViewById(R.id.badge_link_container);
-                    mBadgeImageView = (ImageView) inflated.findViewById(R.id.badge_image);
-                    mBadgeText = (TextView) inflated.findViewById(R.id.badge_text);
+                    mBadgeContainer = stub.inflate();
+                } else {
+                    mBadgeContainer = view.findViewById(R.id.badge_container);
                 }
 
-                mBadgeContainer.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        final Intent intent =
-                                DialtactsActivity.getAddNumberToContactIntent(details.number);
-                        mContext.startActivity(intent);
-                    }
-                });
+                mBadgeContainer.setVisibility(View.VISIBLE);
+                mBadgeImageView = (ImageView) mBadgeContainer.findViewById(R.id.badge_image);
+                mBadgeText = (TextView) mBadgeContainer.findViewById(R.id.badge_text);
+
+                final View clickableArea = mBadgeContainer.findViewById(R.id.badge_link_container);
+                if (clickableArea != null) {
+                    clickableArea.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            // If no lookup uri is provided, we need to rely on what information
+                            // we have available; namely the phone number and name.
+                            if (info.lookupUri == null) {
+                                final Intent intent =
+                                        DialtactsActivity.getAddToContactIntent(details.name,
+                                                details.number,
+                                                details.numberType);
+                                DialerUtils.startActivityWithErrorToast(mContext, intent,
+                                        R.string.add_contact_not_available);
+                            } else {
+                                addContactFromLookupUri(info.lookupUri);
+                            }
+                        }
+                    });
+                }
                 mBadgeImageView.setImageResource(R.drawable.ic_person_add_24dp);
                 mBadgeText.setText(R.string.recentCalls_addToContact);
             } else {
                 // Hide badge if it was previously shown.
-                if (stub == null) {
-                    final View container = view.findViewById(R.id.badge_container);
-                    if (container != null) {
-                        container.setVisibility(View.GONE);
-                    }
+                mBadgeContainer = view.findViewById(R.id.badge_container);
+                if (mBadgeContainer != null) {
+                    mBadgeContainer.setVisibility(View.GONE);
                 }
             }
         }
@@ -1154,14 +1186,18 @@ public class CallLogAdapter extends GroupingListAdapter
 
         if (!needsUpdate) return;
 
-        if (countryIso == null) {
-            mContext.getContentResolver().update(Calls.CONTENT_URI_WITH_VOICEMAIL, values,
-                    Calls.NUMBER + " = ? AND " + Calls.COUNTRY_ISO + " IS NULL",
-                    new String[]{ number });
-        } else {
-            mContext.getContentResolver().update(Calls.CONTENT_URI_WITH_VOICEMAIL, values,
-                    Calls.NUMBER + " = ? AND " + Calls.COUNTRY_ISO + " = ?",
-                    new String[]{ number, countryIso });
+        try {
+            if (countryIso == null) {
+                mContext.getContentResolver().update(Calls.CONTENT_URI_WITH_VOICEMAIL, values,
+                        Calls.NUMBER + " = ? AND " + Calls.COUNTRY_ISO + " IS NULL",
+                        new String[]{ number });
+            } else {
+                mContext.getContentResolver().update(Calls.CONTENT_URI_WITH_VOICEMAIL, values,
+                        Calls.NUMBER + " = ? AND " + Calls.COUNTRY_ISO + " = ?",
+                        new String[]{ number, countryIso });
+            }
+        } catch (SQLiteFullException e) {
+            Log.e(TAG, "Unable to update contact info in call log db", e);
         }
     }
 
@@ -1234,7 +1270,7 @@ public class CallLogAdapter extends GroupingListAdapter
         views.quickContactView.setOverlay(null);
         DefaultImageRequest request = new DefaultImageRequest(displayName, identifier,
                 contactType, true /* isCircular */);
-        mContactPhotoManager.loadDirectoryPhoto(views.quickContactView, photoUri,
+        mContactPhotoManager.loadPhoto(views.quickContactView, photoUri, mPhotoSize,
                 false /* darkTheme */, true /* isCircular */, request);
     }
 
@@ -1386,7 +1422,7 @@ public class CallLogAdapter extends GroupingListAdapter
      * @param forceExpand Whether or not to force the call log row into an expanded state regardless
      *        of its previous state
      */
-    private void handleRowExpanded(CallLogListItemView view, boolean animate, boolean forceExpand) {
+    private void handleRowExpanded(View view, boolean animate, boolean forceExpand) {
         final CallLogListItemViews views = (CallLogListItemViews) view.getTag();
 
         if (forceExpand && isExpanded(views.rowId)) {
@@ -1407,7 +1443,7 @@ public class CallLogAdapter extends GroupingListAdapter
 
             // Animate the collapse of the previous item if it is still visible on screen.
             if (mPreviouslyExpanded != NONE_EXPANDED) {
-                CallLogListItemView previousItem = mCallItemExpandedListener.getViewForCallId(
+                View previousItem = mCallItemExpandedListener.getViewForCallId(
                         mPreviouslyExpanded);
 
                 if (previousItem != null) {
@@ -1419,5 +1455,54 @@ public class CallLogAdapter extends GroupingListAdapter
                 mPreviouslyExpanded = NONE_EXPANDED;
             }
         }
+    }
+
+    /**
+     * Invokes the "add contact" activity given the expanded contact information stored in a
+     * lookup URI.  This can include, for example, address and website information.
+     *
+     * @param lookupUri The lookup URI.
+     */
+    private void addContactFromLookupUri(Uri lookupUri) {
+        Contact contactToSave = ContactLoader.parseEncodedContactEntity(lookupUri);
+        if (contactToSave == null) {
+            return;
+        }
+
+        // Note: This code mirrors code in Contacts/QuickContactsActivity.
+        final Intent intent = new Intent(Intent.ACTION_INSERT_OR_EDIT);
+        intent.setType(ContactsContract.Contacts.CONTENT_ITEM_TYPE);
+
+        ArrayList<ContentValues> values = contactToSave.getContentValues();
+        // Only pre-fill the name field if the provided display name is an nickname
+        // or better (e.g. structured name, nickname)
+        if (contactToSave.getDisplayNameSource()
+                >= ContactsContract.DisplayNameSources.NICKNAME) {
+            intent.putExtra(ContactsContract.Intents.Insert.NAME,
+                    contactToSave.getDisplayName());
+        } else if (contactToSave.getDisplayNameSource()
+                == ContactsContract.DisplayNameSources.ORGANIZATION) {
+            // This is probably an organization. Instead of copying the organization
+            // name into a name entry, copy it into the organization entry. This
+            // way we will still consider the contact an organization.
+            final ContentValues organization = new ContentValues();
+            organization.put(ContactsContract.CommonDataKinds.Organization.COMPANY,
+                    contactToSave.getDisplayName());
+            organization.put(ContactsContract.Data.MIMETYPE,
+                    ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE);
+            values.add(organization);
+        }
+
+        // Last time used and times used are aggregated values from the usage stat
+        // table. They need to be removed from data values so the SQL table can insert
+        // properly
+        for (ContentValues value : values) {
+            value.remove(ContactsContract.Data.LAST_TIME_USED);
+            value.remove(ContactsContract.Data.TIMES_USED);
+        }
+        intent.putExtra(ContactsContract.Intents.Insert.DATA, values);
+
+        DialerUtils.startActivityWithErrorToast(mContext, intent,
+                R.string.add_contact_not_available);
     }
 }

@@ -22,6 +22,7 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.DialogFragment;
 import android.app.KeyguardManager;
+import android.app.ListFragment;
 import android.content.Context;
 import android.content.Intent;
 import android.database.ContentObserver;
@@ -52,7 +53,6 @@ import com.android.dialer.voicemail.VoicemailStatusHelper;
 import com.android.dialer.voicemail.VoicemailStatusHelper.StatusMessage;
 import com.android.dialer.voicemail.VoicemailStatusHelperImpl;
 import com.android.dialerbind.ObjectFactory;
-import com.android.contacts.commonbind.analytics.AnalyticsListFragment;
 
 import java.util.List;
 
@@ -60,7 +60,7 @@ import java.util.List;
  * Displays a list of call log entries. To filter for a particular kind of call
  * (all, missed or voicemails), specify it in the constructor.
  */
-public class CallLogFragment extends AnalyticsListFragment
+public class CallLogFragment extends ListFragment
         implements CallLogQueryHandler.Listener, CallLogAdapter.OnReportButtonClickListener,
         CallLogAdapter.CallFetcher,
         CallLogAdapter.CallItemExpandedListener {
@@ -531,7 +531,7 @@ public class CallLogFragment extends AnalyticsListFragment
 
         if (mFooterView == null) {
             mFooterView = getActivity().getLayoutInflater().inflate(
-                    R.layout.recents_list_footer, (ViewGroup) getView(), false);
+                    R.layout.recents_list_footer, getListView(), false);
             mFooterView.setOnClickListener(new OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -548,7 +548,7 @@ public class CallLogFragment extends AnalyticsListFragment
     }
 
     @Override
-    public void onItemExpanded(final CallLogListItemView view) {
+    public void onItemExpanded(final View view) {
         final int startingHeight = view.getHeight();
         final CallLogListItemViews viewHolder = (CallLogListItemViews) view.getTag();
         final ViewTreeObserver observer = getListView().getViewTreeObserver();
@@ -661,7 +661,7 @@ public class CallLogFragment extends AnalyticsListFragment
      * @return The call log view.
      */
     @Override
-    public CallLogListItemView getViewForCallId(long callId) {
+    public View getViewForCallId(long callId) {
         ListView listView = getListView();
 
         int firstPosition = listView.getFirstVisiblePosition();
@@ -673,7 +673,7 @@ public class CallLogFragment extends AnalyticsListFragment
             if (view != null) {
                 final CallLogListItemViews viewHolder = (CallLogListItemViews) view.getTag();
                 if (viewHolder != null && viewHolder.rowId == callId) {
-                    return (CallLogListItemView)view;
+                    return view;
                 }
             }
         }
