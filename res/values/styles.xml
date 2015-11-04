@@ -15,8 +15,11 @@
   ~ limitations under the License
   -->
 <resources>
-    <style name="DialtactsTheme"
-           parent="android:Theme.Material.Light">
+    <style name="DialtactsTheme1" parent="@android:style/Theme.Material.Light">
+        <item name="android:colorPrimary">@color/dialer_theme_color</item>
+        <item name="android:colorPrimaryDark">@color/dialer_theme_color_dark</item>
+    </style>
+    <style name="DialtactsTheme" parent="@style/DialtactsTheme1">
         <item name="android:textColorPrimary">@color/dialtacts_primary_text_color</item>
         <item name="android:textColorSecondary">@color/dialtacts_secondary_text_color</item>
         <item name="android:windowActionBarOverlay">true</item>
@@ -73,8 +76,6 @@
         <item name="call_log_voicemail_status_action_text_color">#33b5e5</item>
             <!-- Favorites -->
         <item name="favorites_padding_bottom">?android:attr/actionBarSize</item>
-        <item name="android:colorPrimary">@color/dialer_theme_color</item>
-        <item name="android:colorPrimaryDark">@color/dialer_theme_color_dark</item>
         <item name="dialpad_key_button_touch_tint">@color/dialer_dialpad_touch_tint</item>
         <item name="android:colorControlActivated">@color/dialer_theme_color</item>
     </style>
