@@ -119,7 +119,7 @@
         <!-- CallLog -->
         <item name="call_log_primary_background_color">@color/call_log_primary_bg_color</item>
         <item name="call_log_secondary_background_color">@color/call_log_secondary_bg_color</item>
-        <item name="call_log_header_color">@color/call_log_header_color</item>
+        <item name="call_log_header_color">@color/call_log_header_color_dark</item>
         <!-- VoicemailStatus -->
         <item name="call_log_voicemail_status_height">48dip</item>
         <item name="call_log_voicemail_status_background_color">

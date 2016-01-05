@@ -26,5 +26,5 @@
     <color name="dialpad_text_color">#FFFFFF</color>
     <color name="call_log_primary_bg_color">#FFFFFF</color>
     <color name="call_log_secondary_bg_color">#FFFFFF</color>
-    <color name="call_log_header_color">#FFFFFF</color>
+    <color name="call_log_header_color_dark">#FFFFFF</color>
 </resources> 
