@@ -31,7 +31,7 @@ class HumanInteractionClassifier extends Classifier {
   private final StrokeClassifier[] mStrokeClassifiers;
   private final GestureClassifier[] mGestureClassifiers;
   private final HistoryEvaluator mHistoryEvaluator;
-  private final boolean mEnabled;
+  //private final boolean mEnabled;
 
   HumanInteractionClassifier(Context context) {
     DisplayMetrics displayMetrics = context.getResources().getDisplayMetrics();
@@ -43,9 +43,9 @@ class HumanInteractionClassifier extends Classifier {
     float dpi = (displayMetrics.xdpi + displayMetrics.ydpi) / 2.0f;
     mClassifierData = new ClassifierData(dpi, displayMetrics.heightPixels);
     mHistoryEvaluator = new HistoryEvaluator();
-    mEnabled =
+    /*mEnabled =
         ConfigProviderBindings.get(context)
-            .getBoolean(CONFIG_ANSWER_FALSE_TOUCH_DETECTION_ENABLED, true);
+            .getBoolean(CONFIG_ANSWER_FALSE_TOUCH_DETECTION_ENABLED, false);*/
 
     mStrokeClassifiers =
         new StrokeClassifier[] {
@@ -132,7 +132,7 @@ class HumanInteractionClassifier extends Classifier {
   }
 
   public boolean isEnabled() {
-    return mEnabled;
+    return /*mEnabled;*/false;
   }
 
   @Override
